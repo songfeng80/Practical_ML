@@ -1,0 +1,112 @@
+Practical ML Course Project - Prediction of the classe of Exercise
+========================================================
+
+## Background
+
+The dataset come from a study where accelerometers on the belt, forearm, arm, and dumbell of 6 participants. The goal of this project is to predict the manner in which they did the exercise, which is the "classe" variable in the training set. There are some "#DIV/0! in the datasets, which are replaced with NA when reading the datasets.
+
+```{r}
+library(caret)
+library(corrplot)
+training<-read.csv("D:/ML project/pml-training.csv",na.strings=c("#DIV/0!","NA"))
+testing<-read.csv("D:/ML project/pml-testing.csv",na.strings=c("#DIV/0!","NA"))
+dim(training)
+dim(testing)
+```
+
+The training dataset contains 19,622 observations with 160 total variables while the testing dataset also has 160 variables but only 20 observations.
+
+## Feature Selection
+There are alot of variables with missing values, which makes them of limited usage in terms of providing information for prediction. We filter out those variables with at least 90% of missing values.
+
+```{r}
+varkeep <- sapply(colnames(training), function(x) ifelse(sum(is.na(training[, x]))>0,F,T))
+training <- training[, varkeep]
+testing <- testing[, varkeep]
+dim(training)
+```
+which left 60 variables. We further remove the first 7 variables (sequnce variable X, the raw_timestamp_part_1, raw_timestamp_part_2 and cvtd_timestamp variables et al) since these control informations are of lttitle interest here. 
+```{r}
+training <- training[, -c(1:7)]
+testing <- testing[, -c(1:7)]
+```
+When there are varaibles that are highly correlated, the risk of overfitting can be increased. Therefore, we examine the correlations among those variables.
+
+```{r}
+correlations <- cor(training[,-53],method = "spearman")  
+```
+```{r fig.width=7, fig.height=6}
+corrplot(correlations,order = "hclust",tl.cex = .5)
+```
+```{r}
+highCorr <- findCorrelation(correlations, cutoff = .8)  # finding variables with high correlation
+training <- training[, -highCorr]         # remove those features from predictors
+testing <- testing[, -highCorr] 
+```
+
+The remaining data contians 44 variables, with the outcome variable classe and 43 predictor variables.
+
+## CART model
+Given the large number of predictors, a linear relationship may not hold for the given datasets. We first try CART model using classification tree, and accuracy from a CART model is only 0.504, which reflects that CART model provides poor fit.
+
+## Boosting model
+next we run booting model with 10-fold Cross-validation.
+```{r}
+set.seed(1923)
+boostFit <- train(classe ~ ., method = "gbm", data = training, verbose = F, trControl = trainControl(method = "cv", number = 10))
+boostFit
+```
+
+## SVM Model
+Then we run SVM model with 10-fold Cross-validation.
+```{r}
+svmFit <- train(classe ~ ., method = "svmLinear", data = training, preProcess = c('center', 'scale'), trControl = trainControl(method = "cv", number = 10, allowParallel = T))
+svmFit
+```
+
+## Random Forest Model
+Then we run Random Forest model with 10-fold Cross-validation.
+```{r}
+rfFit <- train(classe ~ ., method = "rf", data = training, importance = T, trControl = trainControl(method = "cv", number = 10))
+rfFit
+```
+The accuracy of SVM is only 0.712, while the accuracy from Boosting is 0.9, and both are lower than the Random forest which gives an accuracy of 0.993. Althought we could perform ensembling by aggrating the resuls from differnt methods together, the nearly perfect performance of random forest basically ensure its results are sufficient. Therefore we choose random forest as the best fitted model.
+
+
+```{r}
+rfModel2 <- randomForest(classe ~ .,data = training,importance = TRUE,mtry=2,ntrees =500)
+print(rfModel2)  
+```
+
+##The out of Bag error rate plot
+Black line in the middle is the mse which is the average overall trees.
+```{r fig.width=7, fig.height=6}
+par(mar=c(3,4,4,4))
+plot(rfModel2) 
+```
+##The importance plot
+```{r fig.width=7, fig.height=6}
+varImpPlot(rfModel2,cex=.6)
+```
+
+## Output the prediction
+Then we use the chosen model to predict on the testing dataset, and then use the provided code to output the results.
+
+```{r}
+predtest<-predict(rfModel2,testing)
+
+setwd("D:/ML project/")
+answers<- as.vector(predtest)
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(answers)
+```
+
+
+The chosen model predicts all the 20 cases in the testing set correctly.
